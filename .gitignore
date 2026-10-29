@@ -37,3 +37,9 @@ Thumbs.db
 # Python environments
 venv/
 .env/
+
+.env
+data/
+superset_home/
+metabase/plugins/*.jar
+dbt/target/
