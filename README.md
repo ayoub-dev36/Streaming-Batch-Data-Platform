@@ -1,58 +1,57 @@
-# Trading Analytics Platform — Hybrid Medallion (Real‑time + Batch)
+# Trading Analytics Platform
 
-This repository scaffolds an enterprise‑grade data platform implementing a **Hybrid Medallion** architecture:
+A hybrid **streaming + batch** data platform for trade events, fully containerized with Docker Compose.
+Trades flow through Kafka and Spark into a real-time store (ClickHouse → Metabase) and into an Iceberg lakehouse
+(Bronze → Silver → Gold) transformed by Spark and dbt, orchestrated by Airflow, and served through Trino to Superset.
 
-- **Hot path (≤5s):** Kafka → Spark Structured Streaming → Redis → Metabase
-- **Cold path (T+1 @ 17:00):** Kafka → Spark Batch → Iceberg (Bronze/Silver/Gold) → Trino → Superset
+## Architecture
 
-> Goal: live trade monitoring + robust historical analytics with governance, quality and reproducibility.
+![Trading Analytics Platform architecture](docs/images/Trading_Analytics_Pipeline.gif)
 
----
+| Layer | Technology |
+|---|---|
+| Ingestion | Python trade producer → Apache Kafka |
+| Stream processing | Spark Structured Streaming (dual sink) |
+| Real-time store & BI | ClickHouse → Metabase |
+| Lakehouse | Apache Iceberg (Parquet) on MinIO, PostgreSQL catalog |
+| Batch transformation | Spark (Bronze → Silver), dbt (Silver → Gold) |
+| Orchestration | Apache Airflow |
+| Query & BI | Trino → Superset |
 
-## Repo layout
+## Dashboards
 
-```
-trading-analytics-platform/
-├── docker/                 # Container configs & init scripts
-├── airflow/                # DAGs, plugins, requirements
-├── spark/                  # Streaming & batch jobs (Scala/PySpark)
-├── dbt/                    # dbt project for Gold models
-├── schemas/                # Avro + Iceberg table definitions
-├── docs/                   # Architecture diagrams / ADRs
-├── scripts/                # Utilities (producers, helpers)
-├── superset/               # Superset bootstrap
-├── metabase/               # Metabase notes
-├── config/                 # Central configuration
-├── .env.example
-├── docker-compose.yml
-└── Makefile
-```
+### Metabase: real-time monitoring (ClickHouse)
 
-## SLAs
+![Metabase dashboard](docs/images/metabase_dashboard.png)
 
-- **Real‑time dashboards:** end‑to‑end latency ≤ **5 seconds**
-- **Batch refresh:** **17:00** daily (EOD) for Silver/Gold
+### Superset: historical analytics (Trino / Iceberg Gold)
 
-## Architecture overview
+![Superset dashboard](docs/images/superset.png)
 
-### Realtime (Hot) path
-1. Python producers publish **`trades_raw`** and **`market_data_raw`** to Kafka (Avro).
-2. Spark Structured Streaming validates minimal schema and writes key metrics to **Redis** (TTL 1h).
-3. **Metabase** queries Redis for live cards (PnL, prices, volumes, active positions).
+## Run the pipeline
 
-### Batch (Cold) path
-1. Continuous ingestion persists Kafka payloads to **Iceberg Bronze** (immutable) partitioned by date.
-2. **Airflow** runs daily Spark jobs → **Silver** (clean, deduped, validated via Great Expectations).
-3. **dbt** builds **Gold** marts (e.g., `daily_pnl`, `risk_metrics`, `portfolio_summary`) over Trino.
-4. **Superset** delivers historical analytics with cost‑based optimizations enabled in Trino.
+### Steps
 
-## Getting started
+```bash
+# 1. Clone and configure
+git clone https://github.com/...
+cd Trading-Analytics-Platform
+cp .env.example .env            # Windows PowerShell: copy .env.example .env
 
-1. Copy `.env.example` to `.env` and adjust ports/passwords.
-2. `make up` to launch the stack.
-3. Open the UIs (see `Makefile` + comments in `docker-compose.yml`).
-4. Run the sample producers to generate streaming data (see `scripts/`).
+# 2. Start all containers (first start takes several minutes)
+make up
+make ps                         
 
-## Roadmap lock‑in
+# 3. Initialize the Iceberg lakehouse (once)
+make init
 
-The detailed nine‑stage execution plan lives in `docs/ARCHITECTURE.md` and is mirrored in this README.
+# 4. Install the ClickHouse driver for Metabase (once)
+make metabase-driver
+
+# 5. Start the real-time flow (two terminals)
+make producer                   # terminal 1: generates trades into Kafka
+make streaming                  # terminal 2: Spark Streaming → ClickHouse + Iceberg Bronze
+make count                      # check that trades are arriving in ClickHouse
+
+# 6. Run the batch pipeline: Bronze → Silver (Spark) → Gold (dbt)
+make batch
