@@ -28,7 +28,7 @@ with DAG(
         docker_url="unix://var/run/docker.sock",
         network_mode="trading-analytics-platform_default",
         
-        # Mount both the code AND the config
+        
         mounts=[
             Mount(
                 source="/var/lib/docker/volumes/trading-analytics-platform_spark_code/_data",
